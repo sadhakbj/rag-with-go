@@ -8,6 +8,8 @@ import (
 )
 
 type Config struct {
+	AppName     string
+	AppVersion  string
 	GithubToken string
 }
 
@@ -18,6 +20,16 @@ func LoadConfig() *Config {
 	}
 
 	return &Config{
-		GithubToken: os.Getenv("GITHUB_TOKEN"),
+		AppName:     getEnv("APP_NAME", "rag-with-go"),
+		AppVersion:  getEnv("APP_VERSION", "1.0.0"),
+		GithubToken: getEnv("GITHUB_TOKEN", ""),
 	}
+}
+
+func getEnv(key string, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
