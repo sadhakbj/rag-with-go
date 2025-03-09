@@ -7,17 +7,15 @@ import (
 )
 
 func (c *Container) GithubService() *github.GithubService {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.cache.GithubService != nil {
 		fmt.Println("Returning cached GithubService")
 		return c.cache.GithubService
 	}
 
 	githubToken := c.config.GithubToken
+	httpClient := c.HTTPClient()
 	fmt.Println("Creating new GithubService")
-	githubService := github.NewGithubServiceWithClient(githubToken, c.httpClient)
+	githubService := github.NewGithubServiceWithClient(githubToken, httpClient)
 	c.cache.GithubService = githubService
 
 	return githubService
