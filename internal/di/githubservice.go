@@ -18,5 +18,5 @@ func (c *Container) GithubService() *github.GithubService {
 	githubService := github.NewGithubServiceWithClient(githubToken, httpClient)
 	c.cache.GithubService = githubService
 
-	return githubService
+	return c.cache.GithubService
 }
