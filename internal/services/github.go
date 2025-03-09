@@ -22,6 +22,14 @@ func NewGithubService(token string) *GithubService {
 	}
 }
 
+func NewGithubServiceWithClient(token string, client httpclient.HTTPClient) *GithubService {
+	return &GithubService{
+		httpClient: client,
+		baseURL:    "https://api.github.com",
+		token:      token,
+	}
+}
+
 // PR represents a GitHub pull request
 type PR struct {
 	Number int    `json:"number"`
