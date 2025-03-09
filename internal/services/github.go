@@ -14,9 +14,9 @@ type GithubService struct {
 	token      string
 }
 
-func NewGithubService(token string) *GithubService {
+func NewGithubServiceWithClient(token string, client httpclient.HTTPClient) *GithubService {
 	return &GithubService{
-		httpClient: httpclient.NewClient(),
+		httpClient: client,
 		baseURL:    "https://api.github.com",
 		token:      token,
 	}

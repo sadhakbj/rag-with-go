@@ -2,4 +2,5 @@ run:
 	go run cmd/main.go
 
 build:
-	go build -o app cmd/main.go
+	mkdir -p bin
+	go build -o bin/app cmd/main.go
