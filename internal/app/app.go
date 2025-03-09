@@ -2,14 +2,24 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"encoding/json"
 	"log/slog"
+	"net/http"
 	"os"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sadhakbj/rag-with-go-ollama/internal/config"
 	"github.com/sadhakbj/rag-with-go-ollama/internal/di"
 	"github.com/sadhakbj/rag-with-go-ollama/internal/utils/logger"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type App struct {
@@ -18,6 +28,7 @@ type App struct {
 	Config    *config.Config
 	Container *di.Container
 	Logger    *slog.Logger
+	Tracer    trace.Tracer
 }
 
 func NewApp(config *config.Config) *App {
@@ -32,31 +43,85 @@ func NewApp(config *config.Config) *App {
 func (a *App) Run() {
 	a.Container = di.NewContainer(a.Config)
 	a.Logger.Info("Starting application", "version", a.Version)
-	githubService := a.Container.GithubService()
 
-	context := context.Background()
-	prs, err := githubService.ListPRs(context, "sadhakbj", "rag-with-laravel-ollama")
+	// Set up OpenTelemetry and Jaeger
+	tp, err := a.initTracer()
 	if err != nil {
-		a.Logger.Error("Failed to list PRs", "error", err)
+		a.Logger.Error("Failed to initialize tracer", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = tp.Shutdown(context.Background()) }()
+	a.Tracer = otel.Tracer(a.Name)
+
+	// Set up OpenTelemetry metrics and Prometheus exporter
+	if err := a.initMetrics(); err != nil {
+		a.Logger.Error("Failed to initialize metrics", "error", err)
 		os.Exit(1)
 	}
 
-	for _, v := range prs {
-		fmt.Printf("PR: %d, Title: %s, State: %s\n", v.Number, v.Title, v.State)
-	}
+	// Instrument HTTP handlers
+	http.Handle("/hello", otelhttp.NewHandler(http.HandlerFunc(a.handleHello), "handleHello"))
+	http.Handle("/world", otelhttp.NewHandler(http.HandlerFunc(a.handleWorld), "handleWorld"))
 
-	githubService2 := a.Container.GithubService()
-
-	pr2s, err := githubService2.ListPRs(context, "sadhakbj", "rag-with-laravel-ollama")
-	if err != nil {
-		a.Logger.Error("Failed to list PRs second time", "error", err)
-		log.Fatalf("failed to list PRs second time: %v", err)
+	a.Logger.Info("Listening on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		a.Logger.Error("Failed to start server", "error", err)
 		os.Exit(1)
 	}
+}
 
-	a.Logger.Info("Listing PRs")
-
-	for _, v := range pr2s {
-		fmt.Printf("PR: %d, Title: %s, State: %s\n", v.Number, v.Title, v.State)
+func (a *App) initTracer() (*sdktrace.TracerProvider, error) {
+	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint("http://localhost:14268/api/traces")))
+	if err != nil {
+		return nil, err
 	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(a.Name),
+			semconv.ServiceVersionKey.String(a.Version),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+	return tp, nil
+}
+
+func (a *App) initMetrics() error {
+	exporter, err := prometheus.New()
+	if err != nil {
+		return err
+	}
+
+	provider := metric.NewMeterProvider(
+		metric.WithReader(exporter),
+		metric.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(a.Name),
+			semconv.ServiceVersionKey.String(a.Version),
+		)),
+	)
+	otel.SetMeterProvider(provider)
+
+	http.Handle("/metrics", promhttp.Handler())
+	return nil
+}
+
+func (a *App) handleHello(w http.ResponseWriter, r *http.Request) {
+	_, span := a.Tracer.Start(r.Context(), "handleHello")
+	defer span.End()
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]string{"message": "Hello, World!"}
+	json.NewEncoder(w).Encode(response)
+}
+
+func (a *App) handleWorld(w http.ResponseWriter, r *http.Request) {
+	_, span := a.Tracer.Start(r.Context(), "handleWorld")
+	defer span.End()
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]string{"message": "World, Hello!"}
+	json.NewEncoder(w).Encode(response)
 }
